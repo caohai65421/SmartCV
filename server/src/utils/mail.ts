@@ -39,19 +39,20 @@ export const saveSmtpConfigToEnv = async (emailUser: string, appPassword: string
   const cleanUser = emailUser.trim();
   const cleanPass = appPassword.replace(/\s+/g, '').trim();
 
-  // Kiểm tra kết nối Gmail SMTP thực tế trước khi lưu
-  const testTransporter = nodemailer.createTransport({
-    service: 'gmail',
-    auth: {
-      user: cleanUser,
-      pass: cleanPass,
-    },
-    connectionTimeout: 10000,
-    greetingTimeout: 10000,
-    socketTimeout: 15000,
-  });
-
-  await testTransporter.verify();
+  // Kiểm tra kết nối Gmail SMTP thực tế trước khi lưu (hỗ trợ cả Render Free qua HTTPS Relay)
+  if (!process.env.RENDER) {
+    const testTransporter = nodemailer.createTransport({
+      service: 'gmail',
+      auth: {
+        user: cleanUser,
+        pass: cleanPass,
+      },
+      connectionTimeout: 10000,
+      greetingTimeout: 10000,
+      socketTimeout: 15000,
+    });
+    await testTransporter.verify();
+  }
 
   // Cập nhật ngay trong bộ nhớ runtime của server đang chạy
   process.env.EMAIL_USER = cleanUser;
@@ -173,13 +174,55 @@ export const sendEmailDetailed = async (
     };
   }
 
+  // Hàm gửi dự phòng qua Vercel HTTPS Serverless Relay khi chạy trên Render Free (vốn chặn cổng SMTP 465/587)
+  const trySendViaVercelRelay = async (): Promise<SendEmailDetailResult | null> => {
+    const rawFrontend = (process.env.FRONTEND_URL || '').split(',')[0].trim().replace(/\/+$/, '');
+    if (!rawFrontend || rawFrontend.includes('localhost') || rawFrontend.includes('127.0.0.1')) {
+      return null;
+    }
+    try {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (process.env.MAIL_RELAY_SECRET) {
+        headers['x-mail-relay-secret'] = process.env.MAIL_RELAY_SECRET;
+      }
+      const resp = await fetch(`${rawFrontend}/api/send-mail`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          user,
+          pass,
+          to: to.trim(),
+          subject,
+          html,
+          senderDisplayName,
+        }),
+      });
+      const data: any = await resp.json().catch(() => ({}));
+      if (resp.ok && data?.success) {
+        console.log('Đã gửi email thành công qua cổng HTTPS Relay (Vercel):', data.messageId);
+        return { success: true, configured: true, senderEmail: user };
+      }
+      console.warn('Vercel Mail Relay trả lỗi:', resp.status, data);
+      return null;
+    } catch (err) {
+      console.warn('Không thể gọi Vercel Mail Relay:', err);
+      return null;
+    }
+  };
+
+  // Trên Render Free (biến môi trường RENDER=true), ưu tiên gọi thẳng qua HTTPS Relay để không chờ timeout cổng 465
+  if (process.env.RENDER) {
+    const relayResult = await trySendViaVercelRelay();
+    if (relayResult) return relayResult;
+  }
+
   try {
     const transporter = nodemailer.createTransport({
       service: 'gmail',
       auth: { user, pass },
-      connectionTimeout: 10000,
-      greetingTimeout: 10000,
-      socketTimeout: 15000,
+      connectionTimeout: 8000,
+      greetingTimeout: 8000,
+      socketTimeout: 12000,
     });
 
     const info = await transporter.sendMail({
@@ -196,7 +239,12 @@ export const sendEmailDetailed = async (
       senderEmail: user,
     };
   } catch (error: any) {
-    console.error('Lỗi khi gửi mail qua Gmail SMTP:', error);
+    console.error('Lỗi khi gửi mail qua Gmail SMTP trực tiếp:', error?.message || error);
+
+    // Nếu lỗi kết nối cổng SMTP (ETIMEDOUT / ECONNREFUSED), tự động chuyển tiếp qua HTTPS Relay của Vercel
+    const fallbackRelay = await trySendViaVercelRelay();
+    if (fallbackRelay) return fallbackRelay;
+
     return {
       success: false,
       configured: true,
