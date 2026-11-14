@@ -62,6 +62,16 @@ export const HeaderNotificationAndUserMenu: React.FC = () => {
     }
   });
 
+  // Đồng bộ lại danh sách thông báo đã đọc khi chuyển đổi tài khoản
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(`cvconnect_read_notifs_${user?.id || 'guest'}`);
+      setReadIds(saved ? JSON.parse(saved) : []);
+    } catch {
+      setReadIds([]);
+    }
+  }, [user?.id]);
+
   // Modal Thông tin tài khoản
   const [showProfileModal, setShowProfileModal] = useState(false);
 

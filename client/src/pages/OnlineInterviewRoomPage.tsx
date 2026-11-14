@@ -837,7 +837,7 @@ const OnlineInterviewRoomPage: React.FC = () => {
                 <>
                   <span className="hidden md:inline">•</span>
                   <span className="hidden md:inline text-teal-300">
-                    Lịch hẹn: {schedule.time} ngày {schedule.date.split('-').reverse().join('/')}
+                    Lịch hẹn: {schedule.time} ngày {String(schedule.date || '').split('-').reverse().join('/')}
                   </span>
                 </>
               )}
@@ -901,7 +901,7 @@ const OnlineInterviewRoomPage: React.FC = () => {
                   <span>
                     Ngày hẹn:{' '}
                     <strong className="text-white">
-                      {schedule.date.split('-').reverse().join('/')}
+                      {String(schedule.date || '').split('-').reverse().join('/')}
                     </strong>
                   </span>
                 </p>

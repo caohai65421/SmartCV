@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import prisma from '../utils/prisma';
+import { ensureExtraTables } from '../utils/dbExtraTables';
 
 /**
  * Controller dành cho Quản trị viên (Admin).
@@ -36,10 +37,40 @@ export const updateUserRole = async (req: Request, res: Response) => {
       return res.status(400).json({ message: 'Vai trò không hợp lệ.' });
     }
 
-    const updatedUser = await prisma.user.update({
+    const existingUser = await prisma.user.findUnique({
       where: { id },
-      data: { roleId: role.id },
-      include: { role: true },
+      include: { company: true },
+    });
+    if (!existingUser) {
+      return res.status(404).json({ message: 'Không tìm thấy người dùng.' });
+    }
+
+    const updatedUser = await prisma.$transaction(async (tx) => {
+      if (roleName === 'RECRUITER' && !existingUser.company) {
+        await tx.company.create({
+          data: {
+            recruiterId: id,
+            name: `Doanh nghiệp của ${existingUser.fullName}`,
+            location: 'Hà Nội',
+            description: JSON.stringify({
+              industry: 'Công nghệ thông tin (CNTT)',
+              scale: '10 - 50 nhân sự',
+              province: 'Hà Nội',
+              overview: `Hồ sơ tuyển dụng chính thức của ${existingUser.fullName} trên nền tảng SmartCV.`,
+              coreValues: ['Chuyên nghiệp & Minh bạch', 'Môi trường làm việc năng động'],
+              services: ['Phát triển giải pháp công nghệ & Tuyển dụng nhân sự'],
+              team: 'Đội ngũ trẻ trung, sáng tạo và giàu nhiệt huyết.',
+              detailAddress: 'Hà Nội',
+            }),
+          },
+        });
+      }
+
+      return tx.user.update({
+        where: { id },
+        data: { roleId: role.id },
+        include: { role: true, company: true },
+      });
     });
 
     const { password: _, ...userWithoutPassword } = updatedUser;
@@ -48,6 +79,7 @@ export const updateUserRole = async (req: Request, res: Response) => {
       user: userWithoutPassword,
     });
   } catch (error) {
+    console.error('Lỗi cập nhật vai trò người dùng:', error);
     return res.status(500).json({ message: 'Lỗi hệ thống.' });
   }
 };
@@ -64,6 +96,8 @@ export const deleteUser = async (req: any, res: Response) => {
     if (!targetUser) {
       return res.status(404).json({ message: 'Không tìm thấy người dùng.' });
     }
+
+    await ensureExtraTables();
 
     await prisma.$transaction(async (tx) => {
       // 1. Tìm tất cả tin tuyển dụng do user này đăng (nếu là Recruiter)
@@ -85,7 +119,7 @@ export const deleteUser = async (req: any, res: Response) => {
       });
       const appIds = relatedApps.map((a) => a.id);
 
-      // 3. Xóa tin nhắn liên quan
+      // 3. Xóa tin nhắn & bảng phụ liên quan
       await tx.message.deleteMany({
         where: {
           OR: [
@@ -95,9 +129,25 @@ export const deleteUser = async (req: any, res: Response) => {
           ],
         },
       });
+      await tx.$executeRawUnsafe(
+        `DELETE FROM direct_messages WHERE sender_id = $1 OR receiver_id = $1`,
+        id
+      );
 
-      // 4. Xóa các đơn ứng tuyển liên quan
+      // 4. Xóa các đơn ứng tuyển và dữ liệu mở rộng (lịch PV, đánh giá, PDF đính kèm)
       if (appIds.length > 0) {
+        await tx.$executeRawUnsafe(
+          `DELETE FROM application_attachments WHERE application_id = ANY($1::text[])`,
+          appIds
+        );
+        await tx.$executeRawUnsafe(
+          `DELETE FROM interview_schedules WHERE application_id = ANY($1::text[])`,
+          appIds
+        );
+        await tx.$executeRawUnsafe(
+          `DELETE FROM interview_evaluations WHERE application_id = ANY($1::text[])`,
+          appIds
+        );
         await tx.application.deleteMany({
           where: { id: { in: appIds } },
         });
@@ -201,6 +251,7 @@ export const adminGetAllJobs = async (req: Request, res: Response) => {
 export const adminDeleteJob = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
+    await ensureExtraTables();
     await prisma.$transaction(async (tx) => {
       const apps = await tx.application.findMany({
         where: { jobId: id },
@@ -208,6 +259,18 @@ export const adminDeleteJob = async (req: Request, res: Response) => {
       });
       const appIds = apps.map((a) => a.id);
       if (appIds.length > 0) {
+        await tx.$executeRawUnsafe(
+          `DELETE FROM application_attachments WHERE application_id = ANY($1::text[])`,
+          appIds
+        );
+        await tx.$executeRawUnsafe(
+          `DELETE FROM interview_schedules WHERE application_id = ANY($1::text[])`,
+          appIds
+        );
+        await tx.$executeRawUnsafe(
+          `DELETE FROM interview_evaluations WHERE application_id = ANY($1::text[])`,
+          appIds
+        );
         await tx.message.deleteMany({ where: { applicationId: { in: appIds } } });
         await tx.application.deleteMany({ where: { jobId: id } });
       }

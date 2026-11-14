@@ -18,6 +18,7 @@ import {
   UserCheck,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
+import { useSocket } from '../contexts/SocketContext';
 import api from '../services/api';
 import ChatWindow from './ChatWindow';
 import InterviewScheduleModal, {
@@ -157,6 +158,7 @@ const buildLocalFallbackSupportReply = (
 
 export const FloatingDirectChat: React.FC = () => {
   const { user } = useAuth();
+  const { socket } = useSocket();
   const location = useLocation();
   const isAdmin = user?.role?.name === 'ADMIN';
   const isRecruiter = user?.role?.name === 'RECRUITER';
@@ -423,9 +425,9 @@ export const FloatingDirectChat: React.FC = () => {
     }
   };
 
-  // Đồng bộ phản hồi chính thức từ Admin/CSKH (nếu có trong PostgreSQL)
-  useEffect(() => {
-    if (!user || isAdmin || !isOpen || filterMode !== 'CSKH') return;
+  // Đồng bộ phản hồi chính thức từ Admin/CSKH (nếu có trong PostgreSQL) + lắng nghe realtime qua Socket.io
+  const syncAdminRepliesFromServer = () => {
+    if (!user || isAdmin) return;
     api
       .get('/support/my-tickets')
       .then((res) => {
@@ -440,16 +442,20 @@ export const FloatingDirectChat: React.FC = () => {
           const next = [...prev];
           repliedTickets.forEach((t) => {
             const replyId = `admin-reply-${t.id}-${t.updatedAt || ''}`;
-            const alreadyShown = next.some((m) => m.id.startsWith(`admin-reply-${t.id}`));
-            if (!alreadyShown) {
+            const existingIdx = next.findIndex((m) => m.id.startsWith(`admin-reply-${t.id}`));
+            const updatedMsg: SupportMessageItem = {
+              id: replyId,
+              sender: 'cskh',
+              ticketCode: `${t.ticketCode} • Đã phản hồi`,
+              content: `Phản hồi từ Chuyên viên CSKH:\n${t.adminReply}`,
+              createdAt: t.updatedAt || new Date().toISOString(),
+            };
+            if (existingIdx === -1) {
               changed = true;
-              next.push({
-                id: replyId,
-                sender: 'cskh',
-                ticketCode: `${t.ticketCode} • Đã phản hồi`,
-                content: `Phản hồi từ Chuyên viên CSKH:\n${t.adminReply}`,
-                createdAt: t.updatedAt || new Date().toISOString(),
-              });
+              next.push(updatedMsg);
+            } else if (next[existingIdx].id !== replyId) {
+              changed = true;
+              next[existingIdx] = updatedMsg;
             }
           });
           if (changed) {
@@ -464,7 +470,23 @@ export const FloatingDirectChat: React.FC = () => {
         });
       })
       .catch(() => {});
+  };
+
+  useEffect(() => {
+    if (!user || isAdmin || !isOpen || filterMode !== 'CSKH') return;
+    syncAdminRepliesFromServer();
   }, [user?.id, isAdmin, isOpen, filterMode]);
+
+  useEffect(() => {
+    if (!socket || !user || isAdmin) return;
+    const handleTicketReplied = () => {
+      syncAdminRepliesFromServer();
+    };
+    socket.on('support_ticket_replied', handleTicketReplied);
+    return () => {
+      socket.off('support_ticket_replied', handleTicketReplied);
+    };
+  }, [socket, user?.id, isAdmin, storageKey]);
 
   const handleResetSupportChat = () => {
     const resetList = [createInitialSupportGreeting(user?.fullName, isRecruiter)];
@@ -888,7 +910,7 @@ export const FloatingDirectChat: React.FC = () => {
                               {sched && (
                                 <span className="mt-1.5 inline-flex items-center gap-1 text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
                                   <Calendar size={11} /> Hẹn PV: {sched.time} •{' '}
-                                  {sched.date.split('-').reverse().join('/')}
+                                  {String(sched.date || '').split('-').reverse().join('/')}
                                 </span>
                               )}
                             </div>

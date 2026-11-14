@@ -266,16 +266,38 @@ export const deleteRecruiterJob = async (req: any, res: Response) => {
       return res.status(404).json({ message: 'Không tìm thấy vị trí tuyển dụng của bạn.' });
     }
 
-    // Xóa các tin nhắn và đơn ứng tuyển liên quan trước khi xóa job
-    const apps = await prisma.application.findMany({ where: { jobId: id } });
-    for (const app of apps) {
-      await prisma.message.deleteMany({ where: { applicationId: app.id } });
-    }
-    await prisma.application.deleteMany({ where: { jobId: id } });
-    await prisma.job.delete({ where: { id } });
+    await prisma.$transaction(async (tx) => {
+      const apps = await tx.application.findMany({
+        where: { jobId: id },
+        select: { id: true },
+      });
+      const appIds = apps.map((a) => a.id);
+      if (appIds.length > 0) {
+        try {
+          await tx.$executeRawUnsafe(
+            `DELETE FROM application_attachments WHERE application_id = ANY($1::text[])`,
+            appIds
+          );
+          await tx.$executeRawUnsafe(
+            `DELETE FROM interview_schedules WHERE application_id = ANY($1::text[])`,
+            appIds
+          );
+          await tx.$executeRawUnsafe(
+            `DELETE FROM interview_evaluations WHERE application_id = ANY($1::text[])`,
+            appIds
+          );
+        } catch {
+          // Bỏ qua nếu bảng mở rộng chưa được khởi tạo
+        }
+        await tx.message.deleteMany({ where: { applicationId: { in: appIds } } });
+        await tx.application.deleteMany({ where: { jobId: id } });
+      }
+      await tx.job.delete({ where: { id } });
+    });
 
     return res.json({ message: 'Đã xóa vị trí tuyển dụng thành công.' });
   } catch (error) {
+    console.error('Lỗi khi xóa vị trí tuyển dụng:', error);
     return res.status(500).json({ message: 'Lỗi khi xóa vị trí tuyển dụng.' });
   }
 };

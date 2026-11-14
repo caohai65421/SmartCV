@@ -83,6 +83,18 @@ export const ensureExtraTables = async (): Promise<void> => {
       );
     `);
 
+    // Bảng lưu trữ tin nhắn trực tiếp (Admin <-> Khách hàng) trong PostgreSQL thay vì file cục bộ dễ mất trên Render
+    await prisma.$executeRawUnsafe(`
+      CREATE TABLE IF NOT EXISTS direct_messages (
+        id TEXT PRIMARY KEY,
+        sender_id TEXT NOT NULL,
+        sender_name TEXT NOT NULL,
+        receiver_id TEXT NOT NULL,
+        content TEXT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+    `);
+
     // Đảm bảo 3 vai trò mặc định luôn tồn tại ngay khi khởi tạo DB mới
     try {
       await prisma.$executeRawUnsafe(`

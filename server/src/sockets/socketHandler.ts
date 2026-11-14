@@ -164,7 +164,7 @@ export const initSocketHandlers = (io: Server) => {
 
           const isCandidate = application.candidateId === user.userId;
           const isRecruiter = application.job.postedBy === user.userId;
-          const isAdmin = user.role === 'ADMIN';
+          const isAdmin = (user.roleName || user.role) === 'ADMIN';
 
           if (!isCandidate && !isRecruiter && !isAdmin) {
             socket.emit('interview_room_error', {

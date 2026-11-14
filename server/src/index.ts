@@ -35,8 +35,10 @@ const parseAllowedOrigins = (): string[] => {
     .split(',')
     .map((url) => url.trim().replace(/\/+$/, ''))
     .filter(Boolean);
-  if (!list.includes('http://localhost:5173')) {
-    list.push('http://localhost:5173');
+  for (const requiredOrigin of ['http://localhost:5173', 'https://smart-cv-pearl.vercel.app']) {
+    if (!list.includes(requiredOrigin)) {
+      list.push(requiredOrigin);
+    }
   }
   return list;
 };
@@ -205,11 +207,13 @@ const bootstrapDatabase = async () => {
 // Khởi động Server
 // ============================
 const PORT = Number(process.env.PORT) || 5000;
-httpServer.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 SmartCV Server đang chạy tại cổng: ${PORT}`);
-  console.log(`📡 Socket.io đang lắng nghe kết nối...`);
-  bootstrapDatabase();
-});
+if (process.env.SMARTCV_DISABLE_LISTEN !== 'true') {
+  httpServer.listen(PORT, '0.0.0.0', () => {
+    console.log(`🚀 SmartCV Server đang chạy tại cổng: ${PORT}`);
+    console.log(`📡 Socket.io đang lắng nghe kết nối...`);
+    bootstrapDatabase();
+  });
+}
 
-// Export io để dùng ở các Controller (gửi thông báo realtime)
-export { io };
+// Export app, httpServer và io để dùng ở các Controller & kiểm thử tích hợp
+export { app, httpServer, io };

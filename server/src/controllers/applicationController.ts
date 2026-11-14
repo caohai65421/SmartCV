@@ -8,6 +8,7 @@ import {
   saveSmtpConfigToEnv,
   sendEmailDetailed,
   buildInterviewInvitationEmailHtml,
+  getPublicFrontendUrl,
 } from '../utils/mail';
 
 interface AttachmentRow {
@@ -492,6 +493,12 @@ export const sendInterviewScheduleEmail = async (req: any, res: Response) => {
       application.candidate.fullName ||
       'Ứng viên';
 
+    const resolvedMode = mode === 'ONLINE' ? 'ONLINE' : 'OFFLINE';
+    const defaultOnlineRoomUrl = `${getPublicFrontendUrl()}/interview-room/${id}`;
+    const resolvedLocationOrLink = String(
+      locationOrLink || (resolvedMode === 'ONLINE' ? defaultOnlineRoomUrl : application.job.location)
+    );
+
     // Lưu lịch hẹn phỏng vấn vào bảng interview_schedules trong PostgreSQL
     await upsertInterviewScheduleRow({
       applicationId: id,
@@ -500,8 +507,8 @@ export const sendInterviewScheduleEmail = async (req: any, res: Response) => {
       jobTitle,
       date: String(date || ''),
       time: String(time || '09:30'),
-      mode: mode === 'ONLINE' ? 'ONLINE' : 'OFFLINE',
-      locationOrLink: String(locationOrLink || application.job.location),
+      mode: resolvedMode,
+      locationOrLink: resolvedLocationOrLink,
       interviewer: String(interviewer || 'Bộ phận Tuyển dụng Nhân sự (HR)'),
       note: note ? String(note) : '',
     });
@@ -518,8 +525,8 @@ export const sendInterviewScheduleEmail = async (req: any, res: Response) => {
       jobTitle,
       formattedDate,
       time: time || '09:30',
-      mode: mode === 'ONLINE' ? 'ONLINE' : 'OFFLINE',
-      locationOrLink: locationOrLink || application.job.location,
+      mode: resolvedMode,
+      locationOrLink: resolvedLocationOrLink,
       interviewer: interviewer || 'Bộ phận Tuyển dụng Nhân sự (HR)',
       note,
       recruiterEmail: application.job.author?.email,
@@ -588,6 +595,12 @@ export const saveInterviewSchedule = async (req: any, res: Response) => {
       });
     }
 
+    const resolvedMode = mode === 'ONLINE' ? 'ONLINE' : 'OFFLINE';
+    const defaultOnlineRoomUrl = `${getPublicFrontendUrl()}/interview-room/${id}`;
+    const resolvedLocationOrLink = String(
+      locationOrLink || (resolvedMode === 'ONLINE' ? defaultOnlineRoomUrl : application.job.location)
+    );
+
     await upsertInterviewScheduleRow({
       applicationId: id,
       candidateName: String(candidateName || application.candidate.fullName || 'Ứng viên'),
@@ -595,8 +608,8 @@ export const saveInterviewSchedule = async (req: any, res: Response) => {
       jobTitle: String(jobTitle || application.job.title),
       date: String(date || ''),
       time: String(time || '09:30'),
-      mode: mode === 'ONLINE' ? 'ONLINE' : 'OFFLINE',
-      locationOrLink: String(locationOrLink || application.job.location),
+      mode: resolvedMode,
+      locationOrLink: resolvedLocationOrLink,
       interviewer: String(interviewer || 'Bộ phận Tuyển dụng Nhân sự (HR)'),
       note: note ? String(note) : '',
     });
@@ -617,7 +630,7 @@ export const getInterviewRoomDetails = async (req: any, res: Response) => {
     await ensureExtraTables();
     const { id } = req.params;
     const userId = req.user.userId;
-    const userRole = req.user.role;
+    const userRole = req.user.roleName || req.user.role;
 
     const application = await prisma.application.findUnique({
       where: { id },

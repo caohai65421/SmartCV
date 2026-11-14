@@ -1,13 +1,12 @@
 import { Response } from 'express';
-import fs from 'fs';
-import path from 'path';
 import prisma from '../utils/prisma';
+import { ensureExtraTables } from '../utils/dbExtraTables';
 import { io } from '../index';
 
 /**
  * Controller quản lý tin nhắn thời gian thực (Realtime Messaging):
  * 1. Giữa Nhà tuyển dụng và Ứng viên theo từng Application.
- * 2. Giữa Admin và Khách hàng (Nhà tuyển dụng / Ứng viên) theo thời gian thực qua Socket.io.
+ * 2. Giữa Admin và Khách hàng (Nhà tuyển dụng / Ứng viên) theo thời gian thực qua Socket.io (lưu bền vững trong PostgreSQL).
  */
 
 interface DirectChatMessage {
@@ -19,29 +18,23 @@ interface DirectChatMessage {
   createdAt: string;
 }
 
-const DIRECT_CHAT_FILE = path.join(__dirname, '..', '..', 'uploads', 'direct_messages.json');
+interface DirectMessageRow {
+  id: string;
+  sender_id: string;
+  sender_name: string;
+  receiver_id: string;
+  content: string;
+  created_at: Date | string;
+}
 
-const readDirectMessages = (): DirectChatMessage[] => {
-  try {
-    if (!fs.existsSync(DIRECT_CHAT_FILE)) return [];
-    const raw = fs.readFileSync(DIRECT_CHAT_FILE, 'utf-8');
-    return JSON.parse(raw);
-  } catch {
-    return [];
-  }
-};
-
-const writeDirectMessages = (msgs: DirectChatMessage[]) => {
-  try {
-    const dir = path.dirname(DIRECT_CHAT_FILE);
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
-    }
-    fs.writeFileSync(DIRECT_CHAT_FILE, JSON.stringify(msgs, null, 2), 'utf-8');
-  } catch (err) {
-    console.error('Lỗi lưu tin nhắn trực tiếp:', err);
-  }
-};
+const mapDirectMessageRow = (r: DirectMessageRow): DirectChatMessage => ({
+  id: r.id,
+  senderId: r.sender_id,
+  senderName: r.sender_name,
+  receiverId: r.receiver_id,
+  content: r.content,
+  createdAt: r.created_at instanceof Date ? r.created_at.toISOString() : String(r.created_at),
+});
 
 /**
  * Gửi tin nhắn trực tiếp thời gian thực (Admin <-> Nhà tuyển dụng / Ứng viên).
@@ -49,6 +42,7 @@ const writeDirectMessages = (msgs: DirectChatMessage[]) => {
  */
 export const sendDirectMessage = async (req: any, res: Response) => {
   try {
+    await ensureExtraTables();
     const { receiverId, content } = req.body;
     const senderId = req.user.userId;
 
@@ -70,9 +64,15 @@ export const sendDirectMessage = async (req: any, res: Response) => {
       createdAt: new Date().toISOString(),
     };
 
-    const allMsgs = readDirectMessages();
-    allMsgs.push(newMsg);
-    writeDirectMessages(allMsgs);
+    await prisma.$executeRawUnsafe(
+      `INSERT INTO direct_messages (id, sender_id, sender_name, receiver_id, content, created_at)
+       VALUES ($1, $2, $3, $4, $5, NOW())`,
+      newMsg.id,
+      newMsg.senderId,
+      newMsg.senderName,
+      newMsg.receiverId,
+      newMsg.content
+    );
 
     // Phát thời gian thực qua Socket.io tới cả người nhận và người gửi
     try {
@@ -88,6 +88,7 @@ export const sendDirectMessage = async (req: any, res: Response) => {
 
     return res.status(201).json({ message: 'Đã gửi tin nhắn.', data: newMsg });
   } catch (error) {
+    console.error('Lỗi gửi tin nhắn trực tiếp:', error);
     return res.status(500).json({ message: 'Lỗi khi gửi tin nhắn trực tiếp.' });
   }
 };
@@ -97,18 +98,23 @@ export const sendDirectMessage = async (req: any, res: Response) => {
  */
 export const getDirectMessages = async (req: any, res: Response) => {
   try {
+    await ensureExtraTables();
     const { partnerId } = req.params;
     const currentUserId = req.user.userId;
 
-    const allMsgs = readDirectMessages();
-    const conversation = allMsgs.filter(
-      (m) =>
-        (m.senderId === currentUserId && m.receiverId === partnerId) ||
-        (m.senderId === partnerId && m.receiverId === currentUserId)
+    const rows = await prisma.$queryRawUnsafe<DirectMessageRow[]>(
+      `SELECT id, sender_id, sender_name, receiver_id, content, created_at
+       FROM direct_messages
+       WHERE (sender_id = $1 AND receiver_id = $2)
+          OR (sender_id = $2 AND receiver_id = $1)
+       ORDER BY created_at ASC`,
+      currentUserId,
+      partnerId
     );
 
-    return res.json({ messages: conversation });
+    return res.json({ messages: rows.map(mapDirectMessageRow) });
   } catch (error) {
+    console.error('Lỗi tải tin nhắn trực tiếp:', error);
     return res.status(500).json({ message: 'Lỗi khi tải tin nhắn trực tiếp.' });
   }
 };

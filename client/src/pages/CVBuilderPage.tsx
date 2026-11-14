@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import api from '../services/api';
 import { CVData } from '../types';
+import { useAuth } from '../contexts/AuthContext';
 
 /**
  * Trang CV Builder - Tích hợp Xuất PDF & Lưu trữ Cloudinary.
@@ -23,6 +24,7 @@ const defaultCVData: CVData = {
 const CVBuilderPage = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [cvId, setCvId] = useState<string | null>(null); // Lưu ID sau khi tạo JSON lần đầu
   const [cvTitle, setCVTitle] = useState('');
   const [template, setTemplate] = useState('modern');
@@ -88,11 +90,22 @@ const CVBuilderPage = () => {
       api.get('/cvs/my')
         .then((res) => {
           const first = res.data?.cvs?.[0];
-          if (first) normalizeLoadedCV(first);
+          if (first) {
+            normalizeLoadedCV(first);
+          } else if (user) {
+            setCVData((prev) => ({
+              ...prev,
+              personalInfo: {
+                ...prev.personalInfo,
+                fullName: prev.personalInfo.fullName || user.fullName || '',
+                email: prev.personalInfo.email || user.email || '',
+              },
+            }));
+          }
         })
         .catch(() => {});
     }
-  }, [id]);
+  }, [id, user?.id]);
 
   /** 1. Lưu thông tin JSON vào Database */
   const handleSaveJson = async () => {
@@ -127,8 +140,10 @@ const CVBuilderPage = () => {
       }
       setSuccessMsg('✅ Đã lưu cập nhật CV cá nhân thành công!');
       return res.data.cv;
-    } catch (err) {
+    } catch (err: any) {
       console.error('Lỗi khi lưu JSON:', err);
+      setErrorMsg(err?.response?.data?.message || 'Lỗi khi lưu hồ sơ CV. Vui lòng thử lại.');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
       return null;
     } finally {
       setSaving(false);
@@ -256,6 +271,7 @@ const CVBuilderPage = () => {
                 <label className="block text-sm font-bold text-slate-600 mb-2">Mẫu thiết kế PDF</label>
                 <select className={inputCls} value={template} onChange={(e) => setTemplate(e.target.value)}>
                   <option value="modern">Modern - Thanh lịch & Hiện đại</option>
+                  <option value="professional">Professional - Chuyên nghiệp</option>
                   <option value="classic">Classic - Truyền thống</option>
                   <option value="minimal">Minimal - Tối giản</option>
                 </select>

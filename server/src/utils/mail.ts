@@ -7,6 +7,22 @@ dotenv.config();
 
 const PLACEHOLDER_EMAILS = ['youremail@gmail.com', 'your_email@gmail.com', 'example@gmail.com', ''];
 const PLACEHOLDER_PASSES = ['your_app_password_here', 'your_app_password', 'yourpassword', ''];
+const DEFAULT_PRODUCTION_FRONTEND_URL = 'https://smart-cv-pearl.vercel.app';
+
+/**
+ * Trả về URL Frontend công khai (tự động ưu tiên Vercel Production URL khi chạy trên Render).
+ */
+export const getPublicFrontendUrl = (): string => {
+  const raw = (process.env.FRONTEND_URL || '')
+    .split(',')[0]
+    .trim()
+    .replace(/\/+$/, '');
+  const isLocal = raw.includes('localhost') || raw.includes('127.0.0.1');
+  if (process.env.RENDER && (!raw || isLocal)) {
+    return DEFAULT_PRODUCTION_FRONTEND_URL;
+  }
+  return raw || (process.env.NODE_ENV === 'production' ? DEFAULT_PRODUCTION_FRONTEND_URL : 'http://localhost:5173');
+};
 
 export const getActiveSmtpCredentials = () => {
   const brevoKey = (process.env.BREVO_API_KEY || '').trim();
@@ -176,7 +192,7 @@ export const sendEmailDetailed = async (
 
   // Hàm gửi dự phòng qua Vercel HTTPS Serverless Relay khi chạy trên Render Free (vốn chặn cổng SMTP 465/587)
   const trySendViaVercelRelay = async (): Promise<SendEmailDetailResult | null> => {
-    const rawFrontend = (process.env.FRONTEND_URL || '').split(',')[0].trim().replace(/\/+$/, '');
+    const rawFrontend = getPublicFrontendUrl();
     if (!rawFrontend || rawFrontend.includes('localhost') || rawFrontend.includes('127.0.0.1')) {
       return null;
     }

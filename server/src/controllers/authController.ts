@@ -3,7 +3,7 @@ import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
 import prisma from '../utils/prisma';
 import { generateToken } from '../utils/jwt';
-import { sendEmail } from '../utils/mail';
+import { sendEmail, getPublicFrontendUrl } from '../utils/mail';
 
 /**
  * Controller xử lý tất cả các yêu cầu liên quan đến xác thực (Authentication).
@@ -103,6 +103,7 @@ export const login = async (req: Request, res: Response) => {
     const token = generateToken({
       userId: user.id,
       roleName: user.role.name,
+      role: user.role.name,
     });
 
     const { password: _, ...userWithoutPassword } = user;
@@ -183,7 +184,7 @@ export const forgotPassword = async (req: Request, res: Response) => {
       data: { resetToken, resetTokenExpiry: expiry }
     });
 
-    const frontendUrl = (process.env.FRONTEND_URL || 'http://localhost:5173').replace(/\/+$/, '');
+    const frontendUrl = getPublicFrontendUrl();
     const resetUrl = `${frontendUrl}/reset-password?token=${resetToken}`;
     const htmlContent = `
       <div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 560px; margin: 0 auto; padding: 28px; border: 1px solid #e2e8f0; border-radius: 16px; background: #ffffff; color: #1e293b;">
