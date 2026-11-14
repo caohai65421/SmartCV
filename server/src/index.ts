@@ -20,6 +20,7 @@ import applicationRouter from './routes/applicationRoutes';
 import messageRouter from './routes/messageRoutes';
 import adminRouter from './routes/adminRoutes';
 import supportRouter from './routes/supportRoutes';
+import aiRouter from './routes/aiRoutes';
 import prisma from './utils/prisma';
 import { ensureExtraTables } from './utils/dbExtraTables';
 
@@ -151,6 +152,7 @@ app.use('/api/applications', applicationRouter); // Đơn ứng tuyển: nộp, 
 app.use('/api/messages', messageRouter);    // Tin nhắn: gửi, lấy lịch sử
 app.use('/api/admin', adminRouter);         // Admin: thống kê, quản lý
 app.use('/api/support', supportRouter);     // Chăm sóc khách hàng: phiếu hỗ trợ CSKH
+app.use('/api/ai', aiRouter);               // Trợ lý AI thông minh: phân tích dữ liệu theo ngữ cảnh
 
 // Route kiểm tra API hoạt động
 app.get('/', (_req, res) => {
